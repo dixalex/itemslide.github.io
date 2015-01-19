@@ -39,7 +39,8 @@
             start: 0,
             one_item: false, //Set true for full screen navigation or navigation with one item every time
             pan_threshold: 0.3, //Precentage of slide width
-            disable_autowidth: false
+            disable_autowidth: false,
+            two_slides_on_screen: false
 
         };
 
@@ -398,17 +399,16 @@
 
 
         function isOutBoundaries() { //Return if user is panning out of boundaries
-            return (((Math.floor(slides.translate3d())>(getPositionByIndex(0)) && direction == -1 )||(Math.ceil(slides.translate3d())<(getPositionByIndex(slides.children('li').length - 1)) && direction == 1 )));
+            return (((Math.floor(slides.translate3d())>(getPositionByIndex(0)) && direction == -1 )||(Math.ceil(slides.translate3d())<(getPositionByIndex(slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 ))) && direction == 1 )));
         }
 
         function gotoSlideByIndex(i) {
 
 
-
-            if (i >= slides.children('li').length - 1 || i <= 0) //If exceeds boundaries dont goto slide
+            if (i >= slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 ) || i <= 0) //If exceeds boundaries dont goto slide
             {
                 isBoundary = true;
-                i = Math.min(Math.max(i, 0), slides.children('li').length - 1); //Put in between boundaries
+                i = Math.min(Math.max(i, 0), slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 )); //Put in between boundaries
             } else {
                 isBoundary = false;
             }
