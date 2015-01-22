@@ -5,590 +5,512 @@
 
 
 (function ($) {
-    "use strict";
+	'use strict';
 
-    var isExplorer = false || !!document.documentMode; // At least IE6
+	var isExplorer = false || !!document.documentMode; // At least IE6
 
 
+	$.fn.initslide = function (options) {
 
+		var initialLeft = 0;
 
 
-    $.fn.initslide = function (options) {
+		//Animation variables
+		var currentPos = 0;
+		var currentLandPos = 0;
+		var slidesGlobalID = 0; //rAf id
 
-        var initialLeft = 0;
 
+		var direction = 0; //Panning Direction
+		var isBoundary = false; //Is current slide the first or last one
+		var distanceFromStart = 0;
 
 
-        //Animation variables
-        var currentPos = 0;
-        var currentLandPos = 0;
-        var slidesGlobalID = 0; //rAf id
+		var defaults = { //Options
+			duration         : 350,
+			swipeSensitivity : 150,
+			disableSlide     : false,
+			disableScroll    : false,
+			start            : 0,
+			oneItem          : false, //Set true for full screen navigation or navigation with one item every time
+			panThreshold     : 0.3, //Precentage of slide width
+			disableAutoWidth : false,
+			twoSlidesOnScreen: false,
+			slideOnTap       : true
 
+		};
 
-        var direction = 0; //Panning Direction
-        var isBoundary = false; //Is current slide the first or last one
-        var distanceFromStart = 0;
+		var settings = $.extend({}, defaults, options);
 
 
+		this.data('vars', //Variables that can be accessed publicly
+			{
+				currentIndex    : 0,
+				disableAutoWidth: settings.disableAutoWidth,
+				velocity        : 0
+			});
 
-        var defaults = { //Options
-            duration: 350,
-            swipe_sensitivity: 150,
-            disable_slide: false,
-            disable_scroll: false,
-            start: 0,
-            one_item: false, //Set true for full screen navigation or navigation with one item every time
-            pan_threshold: 0.3, //Precentage of slide width
-            disable_autowidth: false,
-            two_slides_on_screen: false
 
-        };
+		var slides = $(this); //Saves the object given to the plugin in a variable
 
-        var settings = $.extend({}, defaults, options);
+		initialLeft = parseInt(slides.css('left').replace('px', ''));
 
 
-        this.data("vars", //Variables that can be accessed publicly
-            {
-                currentIndex: 0,
-                disable_autowidth: settings.disable_autowidth,
-                velocity: 0
-            });
+		slides.css({ //Setting some css to avoid problems on touch devices
+			'touch-action'               : 'pan-y',
+			'-webkit-user-select'        : 'none',
+			'-webkit-touch-callout'      : 'none',
+			'-webkit-user-drag'          : 'none',
+			'-webkit-tap-highlight-color': 'rgba(0, 0, 0, 0)'
+		});
 
+		if (!settings.disableAutoWidth) {
+			slides.css('width', slides.children('li').length * slides.children('li').width() + 10); //SET WIDTH
+		}
 
+		//console.log("WIDTH: " + slides.css('width'));
 
 
-        var slides = $(this); //Saves the object given to the plugin in a variable
+		slides.translate3d(0);
 
-        initialLeft = parseInt(slides.css("left").replace("px", ""));
 
+		gotoSlideByIndex(settings.start);
 
-        slides.css({ //Setting some css to avoid problems on touch devices
-            'touch-action': 'pan-y',
-            '-webkit-user-select': 'none',
-            '-webkit-touch-callout': 'none',
-            '-webkit-user-drag': 'none',
-            '-webkit-tap-highlight-color': 'rgba(0, 0, 0, 0)'
-        });
 
-        if (!settings.disable_autowidth)
-            slides.css("width", slides.children('li').length * slides.children('li').width() + 10); //SET WIDTH
+		/*Swiping and panning events FROM HERE*/
+		var isDown = false;
 
-        //console.log("WIDTH: " + slides.css("width"));
+		var startPoint = 0;
+		var prevent = false;
 
+		var swipeStartTime = 0;
+		var savedSlide;
+		var touch;
 
-        slides.translate3d(0);
 
+		slides.on('mousedown touchstart', 'li', function (e) {
 
-        gotoSlideByIndex(settings.start);
+			if (!settings.disableSlide) { //Check if user disabled slide - if didn't than go to position according to distance from when the panning started
 
 
+				if (e.type === 'touchstart') {//Check for touch event or mousemove
+					touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
+				} else {
+					touch = e;
+				}
 
 
+				swipeStartTime = Date.now();
 
+				isDown = 1;
 
+				prevent = 0; //to know when to start prevent default
 
-        /*Swiping and panning events FROM HERE*/
-        var isDown = false;
+				startPoint = touch.pageX;
 
-        var startPoint = 0;
-        var prevent = false;
+				savedSlide = $(this);
 
-        var swipeStartTime = 0;
-        var savedSlide;
-        var touch;
 
+				//currentPos = currentLandPos;
 
-        slides.on('mousedown touchstart', 'li', function (e) {
+				//Turn on mousemove event when mousedown
 
-            if (!settings.disable_slide) { //Check if user disabled slide - if didn't than go to position according to distance from when the panning started
+				$(window).on('mousemove touchmove', mousemove); //When mousedown start the handler for mousemove event
 
 
-                if (e.type == 'touchstart') //Check for touch event or mousemove
-                    touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
-                else
-                    touch = e;
+				/*Clear Selections*/
+				if (window.getSelection) { //CLEAR SELECTIONS SO IT WONT AFFECT SLIDING
+					if (window.getSelection().empty) { // Chrome
+						window.getSelection().empty();
+					} else if (window.getSelection().removeAllRanges) { // Firefox
+						window.getSelection().removeAllRanges();
+					}
+				} else if (document.selection) { // IE?
+					document.selection.empty();
+				}
+				/*Clear Selections Until Here*/
 
 
-                swipeStartTime = Date.now();
+			}
+		});
 
-                isDown = 1;
+		//MouseMove related variables
+		var firstTime = true;
+		var savedStartPt = 0;
 
-                prevent = 0; //to know when to start prevent default
 
-                startPoint = touch.pageX;
+		function mousemove(e) //Called by mousemove event (inside the mousedown event)
+		{
 
-                savedSlide = $(this);
 
+			//Check type of event
+			if (e.type === 'touchmove') { //Check for touch event or mousemove
 
+				touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
 
-                //currentPos = currentLandPos;
+				if (Math.abs(touch.pageX - startPoint) > 10) {//If touch event than check if to start preventing default behavior
+					prevent = 1;
+				}
 
-                //Turn on mousemove event when mousedown
+				if (prevent) {
+					e.preventDefault();
+				}
 
-                $(window).on('mousemove touchmove', mousemove); //When mousedown start the handler for mousemove event
+			} else { //Regular mousemove
+				touch = e;
+				e.preventDefault();
+			}
 
 
+			//Triggers
+			slides.trigger('changePos');
+			slides.trigger('pan');
 
 
-                /*Clear Selections*/
-                if (window.getSelection) { //CLEAR SELECTIONS SO IT WONT AFFECT SLIDING
-                    if (window.getSelection().empty) { // Chrome
-                        window.getSelection().empty();
-                    } else if (window.getSelection().removeAllRanges) { // Firefox
-                        window.getSelection().removeAllRanges();
-                    }
-                } else if (document.selection) { // IE?
-                    document.selection.empty();
-                }
-                /*Clear Selections Until Here*/
+			//Set direction of panning
+			if ((-(touch.pageX - startPoint)) > 0) { //Set direction
+				direction = 1; //PAN LEFT
+			} else {
+				direction = -1;
+			}
 
 
+			//If out boundaries than set some variables to save previous location before out boundaries
+			if (isOutBoundaries()) {
 
-            }
-        });
+				if (firstTime) {
+					savedStartPt = touch.pageX;
 
-        //MouseMove related variables
-        var firstTime = true;
-        var savedStartPt = 0;
+					firstTime = 0;
 
+				}
 
-        function mousemove(e) //Called by mousemove event (inside the mousedown event)
-        {
+			}
+			else {
 
+				if (!firstTime) {//Reset Values
+					currentLandPos = slides.translate3d();
+					startPoint = touch.pageX;
+				}
 
-            //Check type of event
-            if (e.type == 'touchmove') //Check for touch event or mousemove
-            {
-                touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
+				firstTime = 1;
 
-                if (Math.abs(touch.pageX - startPoint) > 10) //If touch event than check if to start preventing default behavior
-                    prevent = 1;
+			}
 
-                if (prevent)
-                    e.preventDefault();
+			//Reposition according to current deltaX
 
-            }
-            else //Regular mousemove
-            {
-                touch = e;
-                e.preventDefault();
-            }
 
+			if ((touch.pageX - startPoint) * direction < 6 * (-1)) //Check to see if TAP or PAN by checking using the tap threshold (if surpassed than cancelAnimationFrame and start panning)
+			{
+				cancelAnimationFrame(slidesGlobalID); //STOP animation of sliding because if not then it will not reposition according to panning if animation hasn't ended
 
+				slides.translate3d(
+					//Check if out of boundaries - if true than add springy panning effect
+					((firstTime === 0) ? (savedStartPt - startPoint + (touch.pageX - savedStartPt) / 4) : (touch.pageX - startPoint) ) + currentLandPos
+				);
 
+			}
+		}
 
+		$(window).on('mouseup touchend', /*Pan End*/
 
+			function (e) {
 
-            //Triggers
-            slides.trigger('changePos');
-            slides.trigger('pan');
+				if (!settings.disableSlide) {
 
+					//e.preventDefault();
 
+					if (isDown) {
 
+						if (e.type === 'touchend') {//Check for touch event or mousemove
+							touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
+						} else {
+							touch = e;
+						}
 
-            //Set direction of panning
-            if ((-(touch.pageX - startPoint)) > 0) { //Set direction
-                direction = 1; //PAN LEFT
-            } else {
-                direction = -1;
-            }
+						isDown = false;
 
 
+						//Calculate deltaTime for calculation of velocity
+						var deltaTime = (Date.now() - swipeStartTime);
+						slides.data('vars').velocity = -(touch.pageX - startPoint) / deltaTime;
 
+						if (slides.data('vars').velocity > 0) { //Set direction
+							direction = 1; //PAN LEFT
+						} else {
+							direction = -1;
+						}
 
-            //If out boundaries than set some variables to save previous location before out boundaries
-            if(isOutBoundaries())
-            {
 
-                if(firstTime){
-                    savedStartPt = touch.pageX;
+						distanceFromStart = (touch.pageX - startPoint) * direction * -1;//Yaaa SOOO
 
-                    firstTime = 0;
 
-                }
+						$(window).off('mousemove touchmove'); //Stop listening for the mousemove event
 
-            }
-            else{
+						//TAP is when deltaX is less or equal to 12px
 
-                if(!firstTime){//Reset Values
-                    currentLandPos = slides.translate3d();
-                    startPoint=touch.pageX;
-                }
+						if ((touch.pageX - startPoint) * direction < 6 * (-1)) { //Check distance to see if the event is a tap
+							gotoSlideByIndex(getLandingSlideIndex(slides.data('vars').velocity * settings.swipeSensitivity - slides.translate3d()));
+							//NOT HERE - remove before commit
+						} else {
+							if (settings.slideOnTap && savedSlide.index() !== slides.data('vars').currentIndex) { //TODO: SOLVE MINOR ISSUE HERE
+								//If this occurs then its a tap
+								e.preventDefault(); //FIXED
+								gotoSlideByIndex(savedSlide.index());
+							}
+						}
+					}
+				}
+			}
+		);
 
-                firstTime = 1;
+		/*UNTIL HERE - swiping and panning events*/
 
-            }
 
-            //Reposition according to current deltaX
+		//IF YOU WANT TO ADD MOUSEWHEEL CAPABILITY - USE: https://github.com/jquery/jquery-mousewheel
+		try {
+			slides.mousewheel(function (event) {
 
+				if (!settings.disableScroll) {
+					slides.data('vars').velocity = 0;
+					var mouseLandingIndex = slides.data('vars').currentIndex - event.deltaY;
 
+					if (mouseLandingIndex >= slides.children('li').length || mouseLandingIndex < 0) { //If exceeds boundaries dont goto slide
+						return;
+					}
 
+					gotoSlideByIndex(mouseLandingIndex);
 
+					event.preventDefault();
+				}
+			});
+		} catch (e) {
+		}
+		//UNTILL HERE MOUSEWHEEL
 
 
+		slides.on('gotoSlide', function (e, i) { //triggered when object method is called
+			gotoSlideByIndex(i);
+		});
 
-            if ((touch.pageX - startPoint) * direction < 6 * (-1)) //Check to see if TAP or PAN by checking using the tap threshold (if surpassed than cancelAnimationFrame and start panning)
-            {
-                cancelAnimationFrame(slidesGlobalID); //STOP animation of sliding because if not then it will not reposition according to panning if animation hasn't ended
 
-                slides.translate3d(
+		function changeActiveSlideTo(i) {
 
-                    ((firstTime==0) ? (savedStartPt-startPoint + (touch.pageX - savedStartPt) / 4) : (touch.pageX - startPoint) ) //Check if out of boundaries - if true than add springy panning effect
 
-                                   + currentLandPos);
+			slides.children(':nth-child(' + (slides.data('vars').currentIndex + 1) + ')').attr('id', ''); //WORKS!!
 
-            }
-        }
 
+			slides.children(':nth-child(' + (i + 1) + ')').attr('id', 'active'); //Change destination index to active
 
+			if (i !== settings.currentIndex) { //Check if landingIndex is different from currentIndex
+				slides.data('vars').currentIndex = i; //Set current index to landing index
+				slides.trigger('changeActiveIndex');
+			}
 
 
-        $(window).on('mouseup touchend', /*Pan End*/
+			// ci = i WAS HERE
 
-            function (e) {
 
-                if (!settings.disable_slide) {
+		}
 
-                    //e.preventDefault();
+		function getLandingSlideIndex(x) { //Get slide that will be selected when silding occured - by position
 
-                    if (isDown) {
+			for (var i = 0; i < slides.children('li').length; i++) {
 
-                        if (e.type == 'touchend') //Check for touch event or mousemove
-                            touch = e.originalEvent.touches[0] || e.originalEvent.changedTouches[0];
-                        else
-                            touch = e;
+				if (slides.children(i).width() * i + slides.children(i).width() / 2 -
 
-                        isDown = false;
+					slides.children(i).width() * settings.panThreshold * direction - getPositionByIndex(0) > x) {
 
 
+					if (!settings.oneItem) {
+						return i;
+					}
 
+					else { //If one item navigation than no momentum therefore different landing slide(one forward or one backwards)
+						if (i !== slides.data('vars').currentIndex) {
+							return slides.data('vars').currentIndex + direction; //Return 0 or more
+						} else {
+							return slides.data('vars').currentIndex;
+						}
 
-                        //Calculate deltaTime for calculation of velocity
-                        var deltaTime = (Date.now() - swipeStartTime);
-                        slides.data("vars").velocity = -(touch.pageX - startPoint) / deltaTime;
+					}
 
-                        if (slides.data("vars").velocity > 0) { //Set direction
-                            direction = 1; //PAN LEFT
-                        } else {
-                            direction = -1;
-                        }
 
+				}
 
-                        distanceFromStart = (touch.pageX - startPoint) * direction * -1;//Yaaa SOOO
+			}
 
+			return settings.oneItem ? slides.data('vars').currentIndex + 1 : slides.children('li').length - 1; //If one item enabled than just go one slide forward and not until the end.
 
+		}
 
 
-                        $(window).off('mousemove touchmove'); //Stop listening for the mousemove event
+		function getPositionByIndex(i) {
+			return -(i * slides.children('li').width() - ((slides.parent().width() - initialLeft - slides.children('li').width()) / 2));
+		}
 
-                        //TAP is when deltaX is less or equal to 12px
 
+		function isOutBoundaries() { //Return if user is panning out of boundaries
+			return (((Math.floor(slides.translate3d()) > (getPositionByIndex(0)) && direction === -1 ) || (Math.ceil(slides.translate3d()) < (getPositionByIndex(slides.children('li').length - ( settings.twoSlidesOnScreen ? 2 : 1 ))) && direction === 1 )));
+		}
 
-                        if ((touch.pageX - startPoint) * direction < 6 * (-1)) //Check distance to see if the event is a tap
-                        {
+		function gotoSlideByIndex(i) {
 
-                            gotoSlideByIndex(getLandingSlideIndex(slides.data("vars").velocity * settings.swipe_sensitivity - slides.translate3d()));
-                            //NOT HERE - remove before commit
-                        }
-                    }
-                }
-            }
-        );
 
-        /*UNTIL HERE - swiping and panning events*/
+			if (i >= slides.children('li').length - ( settings.twoSlidesOnScreen ? 2 : 1 ) || i <= 0) //If exceeds boundaries dont goto slide
+			{
+				isBoundary = true;
+				i = Math.min(Math.max(i, 0), slides.children('li').length - ( settings.twoSlidesOnScreen ? 2 : 1 )); //Put in between boundaries
+			} else {
+				isBoundary = false;
+			}
 
 
+			changeActiveSlideTo(i);
 
 
+			//SET DURATION
 
+			totalDuration = Math.max(
+				settings.duration -
+				((1920 / $(window).width()) * Math.abs(slides.data('vars').velocity) *
+				9 * (settings.duration / 230) ) - //Velocity Cut
 
+				(isOutBoundaries() ? (distanceFromStart / 15) : 0) * // Boundaries Spring cut
+				(settings.duration / 230), //Relative to chosen duration
 
-        //IF YOU WANT TO ADD MOUSEWHEEL CAPABILITY - USE: https://github.com/jquery/jquery-mousewheel
-        try {
-            slides.mousewheel(function (event) {
+				50
+			); //Minimum duration is 10
 
-                if (!settings.disable_scroll) {
-                    slides.data("vars").velocity = 0;
-                    var mouseLandingIndex = slides.data("vars").currentIndex - event.deltaY;
+			//SET DURATION UNTILL HERE
 
-                    if (mouseLandingIndex >= slides.children('li').length || mouseLandingIndex < 0) //If exceeds boundaries dont goto slide
-                        return;
+			totalBack = (isBoundary ? ((Math.abs(slides.data('vars').velocity) * 250) / $(window).width()) : 0 );
 
-                    gotoSlideByIndex(mouseLandingIndex);
 
-                    event.preventDefault();
-                }
-            });
-        } catch (e) {}
-        //UNTILL HERE MOUSEWHEEL
+			currentPos = slides.translate3d();
 
+			currentLandPos = getPositionByIndex(i);
 
-        slides.on('gotoSlide', function (e, i) //triggered when object method is called
-            {
-                gotoSlideByIndex(i);
-            });
 
+			//Reset
+			cancelAnimationFrame(slidesGlobalID);
+			startTime = Date.now();
+			slidesGlobalID = requestAnimationFrame(animationRepeat);
 
 
+		}
 
-        function changeActiveSlideTo(i) {
+		var totalBack = 0;
+		var totalDuration = settings.duration;
+		var startTime = Date.now();//For the animation
 
+		function animationRepeat() { //Repeats using requestAnimationFrame
 
 
+			//alert($.easing['swing'](3, 4, 2, 2, 1));
 
-            slides.children(':nth-child(' + (slides.data("vars").currentIndex + 1) + ')').attr('id', ''); //WORKS!!
 
+			var currentTime = Date.now() - startTime;
 
-            slides.children(':nth-child(' + (i + 1) + ')').attr('id', 'active'); //Change destination index to active
+			slides.trigger('changePos');
 
-            if (i != settings.currentIndex) //Check if landingIndex is different from currentIndex
-            {
-                slides.data("vars").currentIndex = i; //Set current index to landing index
-                slides.trigger('changeActiveIndex');
-            }
 
+			slides.translate3d(currentPos - easeOutBack(currentTime, 0, currentPos - currentLandPos, totalDuration, totalBack));
 
-            // ci = i WAS HERE
 
+			//to understand easings refer to: http://upshots.org/actionscript/jsas-understanding-easing
 
-        }
 
-        function getLandingSlideIndex(x) { //Get slide that will be selected when silding occured - by position
+			if (currentTime >= totalDuration) {//Check if easing time has reached total duration
+				//Animation Ended
+				slides.translate3d(currentLandPos);
 
-            for (var i = 0; i < slides.children('li').length; i++) {
+				return; //out of recursion
+			}
 
-                if (slides.children(i).width() * i + slides.children(i).width() / 2 -
 
-                    slides.children(i).width() * settings.pan_threshold * direction - getPositionByIndex(0) > x) {
+			slidesGlobalID = requestAnimationFrame(animationRepeat);
 
 
-                    if (!settings.one_item)
-                        return i;
+		}
 
-                    else //If one item navigation than no momentum therefore different landing slide(one forward or one backwards)
-                    {
-                        if (i != slides.data("vars").currentIndex)
-                            return slides.data("vars").currentIndex + 1 * direction //Return 0 or more
-                        else
-                            return slides.data("vars").currentIndex;
-                    }
 
+	}; //END OF INIT
 
-                }
 
-            }
+	//SET
+	$.fn.gotoSlide = function (i) {
+		this.trigger('gotoSlide', i);
+	};
 
-            return settings.one_item ? slides.data("vars").currentIndex + 1 : slides.children('li').length - 1; //If one item enabled than just go one slide forward and not until the end.
+	$.fn.next = function () { //Next slide
 
-        }
 
+		this.gotoSlide(this.data('vars').currentIndex + 1);
 
 
-        function getPositionByIndex(i) {
-            return -(i * slides.children('li').width() - ((slides.parent().width() - initialLeft - slides.children('li').width()) / 2));
-        }
+	};
 
+	$.fn.previous = function () { //Next slide
 
-        function isOutBoundaries() { //Return if user is panning out of boundaries
-            return (((Math.floor(slides.translate3d())>(getPositionByIndex(0)) && direction == -1 )||(Math.ceil(slides.translate3d())<(getPositionByIndex(slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 ))) && direction == 1 )));
-        }
+		this.gotoSlide(this.data('vars').currentIndex - 1);
+	};
 
-        function gotoSlideByIndex(i) {
+	$.fn.reload = function () { //Get index of active slide
+		if (!this.data('vars').disableAutoWidth) {
+			this.css('width', this.children('li').length * this.children('li').width() + 10); //SET WIDTH
+		}
 
+		this.data('vars').velocity = 0;//Set panning veloicity to zero
+		this.gotoSlide(this.data('vars').currentIndex);
 
-            if (i >= slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 ) || i <= 0) //If exceeds boundaries dont goto slide
-            {
-                isBoundary = true;
-                i = Math.min(Math.max(i, 0), slides.children('li').length - ( settings.two_slides_on_screen ? 2 : 1 )); //Put in between boundaries
-            } else {
-                isBoundary = false;
-            }
+	};
 
+	$.fn.addSlide = function (data) {
+		this.append('<li>' + data + '</li>');
+		this.reload();
+	};
 
-            changeActiveSlideTo(i);
+	$.fn.removeSlide = function (index) {
+		this.children(':nth-child(' + (index + 1) + ')').remove();
+	};
 
 
+	//GET
+	$.fn.getActiveIndex = function () { //Get index of active slide
+		return this.data('vars').currentIndex;
+	};
 
-            //SET DURATION
+	$.fn.getCurrentPos = function () { //Get current position of carousel
 
-            total_duration = Math.max(settings.duration
+		return this.translate3d();
+	};
 
-                - ((1920 / $(window).width()) * Math.abs(slides.data("vars").velocity) *
-                    9 * (settings.duration / 230) //Velocity Cut
 
-                )
+	$.fn.translate3d = function (x) { //Translates the x of an object or returns the x translate value
 
-                - (isOutBoundaries() ? (distanceFromStart / 15) : 0) // Boundaries Spring cut
-                * (settings.duration / 230) //Relative to chosen duration
+		if (x != null) {
+			this.css('transform', 'translate3d(' + x + 'px' + ',0px, 0px)');
+		} else {
+			var matrix = matrixToArray(this.css('transform'));
+			return isExplorer ? parseFloat(matrix[12]) : parseFloat(matrix[4]); //Returns the x value
+		}
+	};
 
-                , 50
-            ); //Minimum duration is 10
 
-            //SET DURATION UNTILL HERE
+	function matrixToArray(matrix) {
+		return matrix.substr(7, matrix.length - 8).split(', ');
+	}
 
-            total_back = (isBoundary ? ((Math.abs(slides.data("vars").velocity)*250)/$(window).width()) : 0 );
 
+	function easeOutBack(t, b, c, d, s) {
+		//s - controls how forward will it go beyond goal
+		if (s === undefined) {
+			s = 1.70158;
+		}
 
-
-
-            currentPos = slides.translate3d();
-
-            currentLandPos = getPositionByIndex(i);
-
-
-
-
-
-
-
-
-
-
-
-            //Reset
-
-
-            cancelAnimationFrame(slidesGlobalID);
-            startTime = Date.now();
-            slidesGlobalID = requestAnimationFrame(animationRepeat);
-
-
-
-        }
-
-        var total_back = 0;
-        var total_duration = settings.duration;
-        var startTime = Date.now();//For the animation
-
-        function animationRepeat() { //Repeats using requestAnimationFrame
-
-
-            //alert($.easing['swing'](3, 4, 2, 2, 1));
-
-
-            var currentTime = Date.now() - startTime;
-
-            slides.trigger('changePos');
-
-
-
-
-
-
-
-            slides.translate3d( currentPos - easeOutBack(currentTime, 0, currentPos - currentLandPos, total_duration, total_back));
-
-
-
-
-            //to understand easings refer to: http://upshots.org/actionscript/jsas-understanding-easing
-
-
-
-            if (currentTime >= total_duration){//Check if easing time has reached total duration
-                //Animation Ended
-                slides.translate3d(currentLandPos);
-
-                return; //out of recursion
-            }
-
-
-
-
-
-
-
-
-            slidesGlobalID = requestAnimationFrame(animationRepeat);
-
-
-        }
-
-
-
-
-
-
-
-
-
-    } //END OF INIT
-
-
-    //SET
-    $.fn.gotoSlide = function (i) {
-        this.trigger('gotoSlide', i);
-    }
-
-    $.fn.next = function () { //Next slide
-
-
-        this.gotoSlide(this.data("vars").currentIndex + 1);
-
-
-    }
-
-    $.fn.previous = function () { //Next slide
-
-        this.gotoSlide(this.data("vars").currentIndex - 1);
-    }
-
-    $.fn.reload = function () { //Get index of active slide
-        if (!this.data("vars").disable_autowidth)
-            this.css("width", this.children('li').length * this.children('li').width() + 10); //SET WIDTH
-
-        this.data("vars").velocity = 0;//Set panning veloicity to zero
-        this.gotoSlide(this.data("vars").currentIndex);
-
-    }
-
-    $.fn.addSlide = function (data) {
-        this.append("<li>" + data + "</li>");
-        this.reload();
-    }
-
-    $.fn.removeSlide = function (index) {
-        this.children(':nth-child(' + (index + 1) + ')').remove();
-    }
-
-
-    //GET
-    $.fn.getActiveIndex = function () { //Get index of active slide
-        return this.data("vars").currentIndex;
-    }
-
-    $.fn.getCurrentPos = function () { //Get current position of carousel
-
-        return this.translate3d();
-    }
-
-
-
-    $.fn.translate3d = function (x) //Translates the x of an object or returns the x translate value
-    {
-        if (x != null) {
-            this.css('transform', 'translate3d(' + x + 'px' + ',0px, 0px)');
-        } else {
-            var matrix = matrixToArray(this.css("transform"));
-            return isExplorer ? parseFloat(matrix[12]) : parseFloat(matrix[4]); //Returns the x value
-        }
-    }
-
-
-
-
-
-    function matrixToArray(matrix) {
-        return matrix.substr(7, matrix.length - 8).split(', ');
-    }
-
-
-    function easeOutBack(t, b, c, d, s) {
-        //s - controls how forward will it go beyond goal
-    if (s == undefined) s = 1.70158;
-
-		return c*((t=t/d-1)*t*((s+1)*t + s) + 1) + b;
-    }
+		return c * ((t = t / d - 1) * t * ((s + 1) * t + s) + 1) + b;
+	}
 
 
 })(jQuery);
