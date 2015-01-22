@@ -289,15 +289,6 @@
 
                             gotoSlideByIndex(getLandingSlideIndex(slides.data("vars").velocity * settings.swipe_sensitivity - slides.translate3d()));
                             //NOT HERE - remove before commit
-                        } else {
-                            if (savedSlide.index() != slides.data("vars").currentIndex) //TODO: SOLVE MINOR ISSUE HERE
-                            { //If this occurs then its a tap
-                                e.preventDefault(); //FIXED
-                                gotoSlideByIndex(savedSlide.index());
-                            }
-                            else{
-
-                            }
                         }
                     }
                 }
